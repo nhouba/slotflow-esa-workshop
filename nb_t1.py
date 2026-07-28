@@ -46,8 +46,9 @@ TITLE = '''\
 
 **The lesson of this session, in one sentence:**
 
-> *A model predicts the correct set only when the training objective
-> respects the symmetry of the problem.*
+> *If the training objective ignores the symmetry of the problem, the model
+> cannot predict the correct set — even when the data tells it everything it
+> needs.*
 
 We work with **toy spectral sources** — 1-D mixtures of narrow Gaussian
 peaks. They are *not* LISA waveforms; the connection to LISA is that both
@@ -249,10 +250,12 @@ $$\\mathbb{E}\\big[\\tfrac{1}{2}\\lVert\\theta_1-\\theta_2\\rVert^2\\big]
 = \\tfrac{0.8^2}{12} + \\tfrac{1^2}{12} \\approx 0.137
 \\quad\\text{for our priors,}$$
 
-which is exactly where the curve sits. More epochs or more data cannot
-push below it (the 30-epoch staged checkpoint plateaus at the same value)
-— **the objective, not the network or the optimizer, is broken.** That is
-the diagnosis a loss curve alone would never give you.'''
+which is where the curve sits. Read that as a **lower bound** on the ordered
+loss: it assumes a model that recovers both sources exactly, so a real model
+with noise can only do worse — and no amount of training pushes it below
+(the 30-epoch staged checkpoint plateaus at the same value). **The objective,
+not the network or the optimizer, is what limits this run.** That is a
+diagnosis the loss curve alone does not give you.'''
 
 
 S3_MD = '''\
@@ -571,18 +574,27 @@ Watch the projector for this one (run the widget yourself later — every
 slider move is true inference). Intuition says: "move the peaks together
 and matching breaks." The truth is sharper:
 
-> **Frequency overlap alone does not create assignment ambiguity.
-> Ambiguity appears when the sources become indistinguishable under the
-> COMPLETE matching metric** — two coincident peaks with clearly different
-> amplitudes are still perfectly assignable.
+> **Frequency crowding on its own need not create assignment ambiguity.
+> What removes the ambiguity is a second coordinate the metric can use** —
+> in the probe below, two peaks separated by less than a peak width keep a
+> healthy assignment margin under the full (μ, A) metric when their
+> amplitudes clearly differ, while a frequency-only metric gives almost no
+> margin at all.
+
+Two honest limits on that. It is a statement about *this* trained model on
+*this* toy, measured on the frames we show — not a general guarantee. And it
+is about the **assignment**, not about identifiability: at exactly equal
+frequencies the data constrains only the *sum* of the two amplitudes, so
+there the catalogue itself is unrecoverable no matter which metric you
+match under.
 
 The diagnostic: with K=2 there are exactly **two** possible assignments,
 with totals $C_{00}{+}C_{11}$ and $C_{01}{+}C_{10}$ — the **assignment
 margin** is just their difference (best vs second-best). The title reports
 it under two metrics at once: the full (μ, A) cost and frequency-only.
-Drag the separation down at equal amplitudes and both margins collapse;
-raise the amplitude ratio and the full-metric margin comes back while the
-frequency-only margin stays dead. (A systematic sweep of this experiment
+Drag the separation down at equal amplitudes and both margins fall to
+~0.001; make the amplitudes clearly unequal and the full-metric margin
+returns (~0.3) while the frequency-only margin stays at ~0.002. (A systematic sweep of this experiment
 lives in the take-home appendix.)'''
 
 S5_INTERACT = '''\
@@ -643,8 +655,8 @@ try:
              seed=(0, 20))
     # static reference frames (widget state is not saved with the file):
     # the two states that carry the lesson —
-    probe(sep=0.02, amp_ratio=1.0)   # coincident + equal amps: ambiguous
-    probe(sep=0.02, amp_ratio=0.6)   # coincident + unequal: still assignable
+    probe(sep=0.02, amp_ratio=1.0)   # sep = 0.8 peak widths, equal amps
+    probe(sep=0.02, amp_ratio=0.6)   # same separation, amplitudes differ
 except ImportError:
     print("ipywidgets unavailable — three snapshots instead:")
     for sep, ar in [(0.25, 1.0), (0.02, 1.0), (0.02, 0.5)]:
@@ -698,19 +710,22 @@ for mode, colr, lbl in [("equal", C["gold"], "equal amplitudes"),
     ax1.plot(s, e, color=colr, marker=".", label=lbl)
 ax0.set_xlabel("true source separation"); ax0.set_ylabel("assignment margin")
 ax0.legend()
-title2(ax0, "Overlap kills the margin only when amplitudes\\n"
-       "cannot break the tie", "median with 25–75% band")
+title2(ax0, "The margin survives overlap when amplitudes\\n"
+       "can break the tie", "median with 25–75% band, 150 mixtures per point")
 ax1.set_xlabel("true source separation")
 ax1.set_ylabel("matched parameter loss")
 title2(ax1, "Parameter error also grows as peaks merge")
 ax1.legend()
 plt.tight_layout()
 
-print("Equal-amplitude pairs: the margin collapses toward zero as the "
-      "peaks merge —\\ngenuine ambiguity. Unequal-amplitude pairs stay "
-      "assignable at zero separation:\\nthe amplitude coordinate resolves "
-      "the assignment. Ambiguity = indistinguishability\\nunder the FULL "
-      "metric, not frequency crowding per se.")'''
+print("Equal-amplitude pairs: the margin falls toward zero as the peaks "
+      "merge — the\\nassignment becomes a coin flip. Unequal-amplitude pairs "
+      "keep a usable margin down\\nto the smallest separation swept here "
+      "(0.005, a fifth of the peak width): the\\namplitude coordinate "
+      "resolves the assignment. So on this toy, ambiguity tracks\\n"
+      "indistinguishability under the FULL metric rather than frequency "
+      "crowding alone.\\n(Measured with one trained model over these "
+      "separations — not a general law.)")'''
 
 
 S6_MD = '''\
@@ -719,8 +734,8 @@ S6_MD = '''\
 1. **Catalogues are unordered.**
 2. **Slot indices are arbitrary.**
 3. **Training *and evaluation* must both account for permutation.**
-4. **Matching becomes ambiguous only when sources become indistinguishable
-   under the complete metric.**
+4. **Ambiguity tracked indistinguishability under the complete metric** —
+   frequency crowding alone did not produce it here.
 
 The concept map below is the whole morning in one picture — and the bridge
 to this afternoon, where the number of sources itself becomes unknown.'''
@@ -751,8 +766,8 @@ ax.text(0.5, 0.16,
         "matrix rows/columns → same optimal total → same loss",
         ha="center", fontsize=10, style="italic", color=C["ink"])
 ax.text(0.5, 0.02,
-        "Tutorial 2: the number of sources K becomes unknown → a "
-        "cardinality posterior q(K|x) and per-slot existence probabilities",
+        "Tutorial 2: the number of sources K becomes unknown → the model "
+        "predicts a posterior over the count itself, q(K|x)",
         ha="center", fontsize=10, color=C["truth"])
 ax.set_xlim(0, 1); ax.set_ylim(0, 1)
 title2(ax, "Set prediction with Hungarian matching — the complete loop")
@@ -771,8 +786,8 @@ $$\\mathcal{L} = \\sum_{(i,j)\\in\\pi^*} c(\\hat\\theta_i, \\theta_j)
 
 where $y_i = 1$ iff slot $i$ was matched to a true source. Everything you
 need is already in this notebook. In Tutorial 2 you will meet the *other*
-way to make K a prediction: a categorical posterior $q(K\\mid x)$ — and
-you will derive per-slot existence probabilities from it.
+way to make K a prediction: a categorical posterior $q(K\\mid x)$ over the
+count itself, whose argmax is the number of slots the model claims.
 
 ### One question to carry into Tutorial 2
 
@@ -788,9 +803,17 @@ Keeping those apart is the real skill this workshop is about, and
 Tutorial 2 will test it on a model you did not train.'''
 
 
+COLAB = ("[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]"
+         "(https://colab.research.google.com/github/nhouba/slotflow-esa-workshop/"
+         "blob/main/{nb})\n\n")
+
+
 def cells(solution):
     title = TITLE if not solution else TITLE.replace(
         "# Tutorial 1 —", "# Tutorial 1 (SOLUTION) —")
+    # "Open in Colab" badge, so the notebook is one click from GitHub
+    title = COLAB.format(nb="slotflow_tutorial_1_solution.ipynb" if solution
+                         else "slotflow_tutorial_1_toy.ipynb") + title
     out = [
         md(title), code(SETUP),
         md(S1_MD), code(S1_HUMAN), code(S1_REVEAL),

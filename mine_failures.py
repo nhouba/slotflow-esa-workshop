@@ -43,10 +43,14 @@ def label_signal(pred, truth, k_pred, k_true, tol=TOL_F):
         labels.add("overcount")
     if k_pred == k_true and un_p and un_t:
         labels.add("exactK_wrong")
-    for j in range(len(truth)):
-        close = [i for i in range(len(pred))
-                 if abs(pred[i, 2] - truth[j, 2]) <= tol]
-        if len(close) >= 2:
+    # duplicate = a REDUNDANT claim: an unmatched prediction sitting within
+    # tol of a true source that some other prediction already explains.
+    # (Counting predictions near each truth without consulting the assignment
+    # fires on well-separated pairs whose members are merely closer together
+    # than tol — a metric artifact, not a model failure.)
+    matched_t = {j for _, j in pairs}
+    for i in un_p:
+        if any(abs(pred[i, 2] - truth[j, 2]) <= tol for j in matched_t):
             labels.add("duplicate")
     for j1 in range(len(truth)):
         for j2 in range(j1 + 1, len(truth)):
@@ -103,6 +107,17 @@ def main():
         mystery.append(compound[0])
         covered |= set(compound[0]["labels"])
         used.add(compound[0]["index"])
+    # the duplicate is the rarest failure (~1%) and the one NMS addresses in
+    # the challenge, so make sure ONE case is duplicate-led rather than letting
+    # it appear only inside the compound pile-up: prefer the fewest extra
+    # labels and a readable K.
+    dup_led = sorted((e for e in cands
+                      if "duplicate" in e["labels"] and e["index"] not in used),
+                     key=lambda e: (e["k_true"] > 8, len(e["labels"])))
+    if dup_led:
+        mystery.append(dup_led[0])
+        covered |= set(dup_led[0]["labels"])
+        used.add(dup_led[0]["index"])
     seen_sets = {tuple(sorted(m["labels"])) for m in mystery}
     while len(mystery) < 4:
         best = max((e for e in cands if e["index"] not in used),

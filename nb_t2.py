@@ -2,7 +2,7 @@
 
 Imported by build_notebooks.py. Conventions:
  * frequency ERRORS/WIDTHS/TOLERANCES in mHz (absolute frequencies in Hz);
- * K_true / K_MAP / K_tau always distinguished;
+ * K_true vs K_MAP always distinguished; slots past K_MAP are surplus;
  * plumbing lives in t2_helpers.py so the notebook stays readable;
  * the optional material (embeddings, extra diagnostics, the cost-metric
    demo) sits in an appendix AFTER the wrap-up so live rooms don't run it
@@ -28,12 +28,14 @@ Speri, arXiv:2511.23228) trained on LISA-like sinusoid mixtures with an
 *unknown number of sources* K ∈ {1…10}. No training here — we analyse and
 debug, the way you would qualify any inference component for a pipeline.
 
-**One thing to be clear about up front: the neural network never runs in
-this session.** It was run *offline* on 2,000 test signals — 1,200
-**nominal** (drawn from the same distribution the model was trained on)
-and 800 **stress** (frequencies packed *below* the training separation
-floor and noise *louder* than anything seen in training: conditions the
-model has never met, which is where its failures live) — plus controlled
+**One thing to be clear about up front: the network does not run in any of
+the analysis cells below.** It was run *offline* on 2,000 test signals —
+1,200 **nominal** (drawn from the same distribution the model was trained
+on) and 800 **stress**: frequencies packed to a minimum separation of
+4 mHz where training never went below 10 mHz, and noise drawn from
+1.0–2.0 where training drew 0–1.5. So the separation is strictly outside
+the training range and the noise reaches above it; that is where the
+failures we study live. Plus controlled
 stability experiments. Everything
 it produced — the cardinality posterior q(K|x), each slot's MAP
 parameters, posterior samples and widths, embeddings, the input spectra,
@@ -44,8 +46,8 @@ Appendix **A0** shows how to run the pretrained model yourself.
 | when | what |
 |---|---|
 | 0–4′ | setup |
-| 4–10′ | **§1** bridge from the toy; q(K\\|x) → existence; meet the model |
-| 10–16′ | **§2** slot tables: K_true vs K_MAP vs K_τ |
+| 4–10′ | **§1** bridge from the toy; q(K\\|x) and the count; meet the model |
+| 10–16′ | **§2** slot tables: K_true vs K_MAP, and surplus slots |
 | 16–23′ | **§3** stable specialization ≠ physical identity |
 | 23–31′ | **§4** multi-label failure gallery |
 | 31–50′ | **§5** the Catalogue Challenge |
@@ -92,9 +94,9 @@ import matplotlib.pyplot as plt
 
 import viz
 from viz import C, mark_truth, mark_pred, title2, fmt_mhz
-from catalogue_metrics import (existence_probs, match_catalogue,
-                               catalogue_scores, build_catalogue,
-                               suppress_duplicates, slot_distance, TOL_F)
+from catalogue_metrics import (match_catalogue, catalogue_scores,
+                               build_catalogue, suppress_duplicates,
+                               slot_distance, TOL_F)
 import catalogue_metrics
 
 import t2_helpers                       # caches + slot_table/show_signal —
@@ -116,20 +118,21 @@ S1_MD = '''\
 | point predictions | full per-slot posteriors from a shared normalizing flow |
 | your `hungarian_loss` (squared error) | Hungarian-matched flow negative log-likelihood |
 
-**Where do existence probabilities come from?** This model has no per-slot
-existence head. It has a *categorical cardinality posterior* $q(K\\mid x)$,
-and slots are instantiated in index order — slot $i$ (0-based) exists iff
-$K \\ge i{+}1$. So the per-slot existence probability is **derived**:
+**How does the model say how many sources there are?** With a *categorical
+posterior over the count*, $q(K \\mid x)$ — ten numbers, the probability that
+the count is 1, 2, … up to 10. Slots are then instantiated in **index
+order**, so the model's catalogue is simply its first $K_{\\rm MAP}$ slots:
 
-$$p_i = P(K \\ge i{+}1 \\mid x) = \\sum_{k \\ge i+1} q(k\\mid x),$$
+$$K_{\\rm MAP} = \\arg\\max_k \\, q(k \\mid x) \\qquad\\text{— the model's answer.}$$
 
-monotone non-increasing in $i$. Three cardinalities will appear side by
-side all afternoon — keep them apart:
+The pack stores **all ten** slots for every signal (we forced them), so the
+slots past $K_{\\rm MAP}$ are visible too — those are **surplus** slots, and
+they hold no source. Two counts appear side by side all afternoon:
 
 * $K_{\\rm true}$ — how many sources the simulator injected;
-* $K_{\\rm MAP}$ — the argmax of $q(K\\mid x)$: the single most probable
-  count, hence "MAP" (*maximum a posteriori*) — the model's answer;
-* $K_{\\tau}$ — how many slots clear a chosen existence threshold τ.'''
+* $K_{\\rm MAP}$ — how many the model claims (*maximum a posteriori*).
+
+Whether we should accept $K_{\\rm MAP}$ as given is exactly what §5 asks.'''
 
 S1_CODE = '''\
 # --- One signal, everything the model said about it -------------------------
@@ -137,24 +140,21 @@ S1_CODE = '''\
 #   LEFT:  what the model READ (the spectrum, from pack["nominal_spec"]) with
 #          the true sources (dashed) and the slots it activated (top strip);
 #   RIGHT: what the model ANSWERED — its cardinality posterior q(K|x)
-#          (pack["nominal_q_k"]) and the per-slot existence p_i derived
-#          from it by the formula above.
+#          (pack["nominal_q_k"]), with its argmax K_MAP marked.
 # Data: precomputed pack arrays; the helper show_signal is in t2_helpers.py.
-# Look for: q(K|x) is a sharp spike at the true K; p_i is its running tail —
-#   a "staircase" that drops from 1 to 0 exactly after the last real slot.
+# Look for: q(K|x) is a sharp spike at the true K, and the model claims
+#   exactly that many slots — the ones drawn in the strip on the left.
 i = 4
 fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11, 2.9),
                                gridspec_kw={"width_ratios": [2, 1]})
 show_signal("nominal", i, ax=ax0, legend=True)
 q = pack["nominal_q_k"][i]
-p = EX["nominal"][i]
-ax1.bar(np.arange(1, M + 1) - 0.18, q, width=0.36, color=C["pred"],
-        label="q(K=k | x)")
-ax1.bar(np.arange(1, M + 1) + 0.18, p, width=0.36, color=C["gold"],
-        label="p_i = P(K ≥ i | x)")
-ax1.axhline(0.5, color=C["ink"], lw=0.8, ls=":")
-ax1.set_xlabel("k  /  slot i+1"); ax1.legend()
-title2(ax1, "Cardinality posterior → derived existence")
+kmap = int(pack["nominal_k_pred"][i])
+ax1.bar(np.arange(1, M + 1), q, width=0.6, color=C["pred"],
+        label="q(K = k | x)")
+ax1.axvline(kmap, color=C["truth"], ls="--", lw=1.2, label=f"K_MAP = {kmap}")
+ax1.set_xlabel("number of sources  k"); ax1.set_ylim(0, 1.05); ax1.legend()
+title2(ax1, "The model's posterior over the count")
 plt.tight_layout()'''
 
 S1_CONFUSION = '''\
@@ -211,15 +211,15 @@ in Hz; posterior widths σ_f in **mHz** — the model's typical claimed
 precision is a fraction of the 3.33 mHz frequency bin.)
 
 For each example below, answer **before** reading the status column:
-1. Which slots should be active, and do $K_{\\rm MAP}$ and $K_{\\tau}$ agree?
-2. Which predictions are matched to a true source?
-3. Is an unmatched active slot a **duplicate** (near another slot) or
+1. How many slots does the model claim, and does that match $K_{\\rm true}$?
+2. Which of the claimed slots are matched to a true source?
+3. Is an unmatched claimed slot a **duplicate** (near another slot) or
    sitting on nothing?'''
 
 S2_CODE = '''\
 # --- The per-signal view you'll use all afternoon ---------------------------
 # What: slot_table(subset, i) prints, for ONE signal, every slot's stored
-#   existence p_i, MAP frequency/amplitude, claimed width σ_f, and whether
+#   MAP frequency/amplitude, claimed width σ_f, and whether
 #   Hungarian matching pairs it with a true source (helpers: t2_helpers.py;
 #   all numbers come from the pack). show_signal draws the same signal.
 # Do: read nominal[4] first (easy), then stress[1] — answer the three
@@ -237,16 +237,19 @@ specialization. We test it two ways, with the same fixed K=5 catalogue:
 
 1. **Noise stability** — 20 fresh noise realizations of the *same*
    catalogue. If specialization is real, each slot should hold the same
-   source every time. *(Spoiler: it does — this is a genuinely stable,
-   interesting property, and note the mapping is not frequency-ordered.)*
+   source every time. *(Spoiler: on this catalogue it does, in all 20 draws
+   — an interesting property, and note the mapping is not frequency-ordered.
+   One catalogue and 20 draws is a passed test with a stated scope, not a
+   general law.)*
 2. **Structural stability** — the catalogue itself changes: one source
    inserted below the band, one removed, all frequencies shifted by
    +10 mHz (an adjacent-window proxy). Does slot $i$ keep tracking "its"
    source?
 
-The distinction this section installs: **within a fixed configuration,
-slot specialization can be perfectly stable — and a slot index is still an
-internal model convention, not a persistent astrophysical identifier.**'''
+The distinction this section installs: **within a fixed configuration, slot
+specialization was perfectly stable in everything we measured here — and a
+slot index is still an internal model convention, not a persistent
+astrophysical identifier.**'''
 
 S3_STAB = '''\
 # --- Experiment 1: same catalogue, 20 fresh noise draws --------------------
@@ -333,10 +336,11 @@ title2(ax, "Change the catalogue → the slot→source mapping reshuffles",
        "all noise draws)")
 plt.tight_layout()
 
-print("Within every configuration the mapping is perfectly repeatable — "
-      "and one\\nstructural change (one inserted source!) reshuffles which "
-      "slot holds which\\nsource. Specialization is a property of the "
-      "(model, configuration) pair,\\nnot an identity you can carry across "
+print("Within each configuration the mapping repeated exactly across all "
+      "8 noise draws\\nwe ran — and one structural change (a single inserted "
+      "source) reshuffles which\\nslot holds which source. On this evidence "
+      "specialization behaves like a property\\nof the (model, "
+      "configuration) pair rather than an identity you can carry across\\n"
       "catalogues.")'''
 
 S3_DIST = '''\
@@ -360,17 +364,17 @@ that applies**:
 
 | label | meaning |
 |---|---|
-| miss | a true source has no matched active slot |
+| miss | a true source has no matched claimed slot |
 | merge | two close true sources represented by one prediction |
-| duplicate | two active slots on the same true source |
+| duplicate | a claim on a source another claim already explains |
 | undercount | $K_{\\rm MAP} < K_{\\rm true}$ |
 | overcount | $K_{\\rm MAP} > K_{\\rm true}$ |
 | exact-K wrong | count correct, membership wrong |
 
 The exemplars were mined by open criteria (`mine_failures.py`) and the
-base rates are shown at the reveal. One label never occurs for this
-model — you may already have spotted the evidence in §1's confusion
-matrices; the reveal makes it explicit.'''
+base rates are shown at the reveal. One label does not occur anywhere in
+these 2,000 signals — you may already have spotted the evidence in §1's
+confusion matrices; the reveal makes it explicit.'''
 
 S4_SHOW = '''\
 mystery = gallery["mystery"]
@@ -435,8 +439,8 @@ The network is frozen. Your job is the **decision layer** — the rules
 that turn the network's raw outputs (slots + probabilities) into the
 final catalogue you would publish:
 
-> *Produce the best catalogue from the candidate slots, their existence
-> probabilities — and anything else in the pack.*
+> *Produce the best catalogue from the candidate slots, the model's count
+> posterior — and anything else in the pack.*
 
 **How catalogues are scored here, in plain words** (a claimed source
 *detects* a true source when they match within 5 mHz):
@@ -460,7 +464,9 @@ more than any single scalar.
 Your toolbox — fair warning: *one of these is a decoy, one is a scalpel
 that cuts both ways, and the best move isn't a knob at all*:
 
-1. **Existence threshold** $K_{\\tau}$ — sweep it and *measure*.
+1. **Claim a different number of sources.** The model only ever undercounts
+   (§4), so the tempting fix is to ask for $K_{\\rm MAP}{+}1$ slots. Try it and
+   *measure* — the pack stores all ten.
 2. **Duplicate suppression** — when two claimed sources are nearly
    identical, keep only the more confident one. (Computer vision calls
    this *non-maximum suppression*, "NMS" — you'll see that name in the
@@ -474,88 +480,120 @@ baseline_dev = evaluate(baseline_catalogue, DEV, "baseline (dev 150)")
 baseline_full = evaluate(baseline_catalogue, FULL, "baseline (full 800)")'''
 
 S5_SWEEP = '''\
-# --- Knob 1: the existence threshold — measure it, then explain it --------
-taus = np.linspace(0.05, 0.95, 10)
-sw = [evaluate(lambda i, t=t: pack["stress_maps"][i][:k_tau("stress", i, t)],
-               DEV, quiet=True) for t in taus]
+# --- Knob 1: claim a different number of sources -------------------------
+# What: the model only ever undercounts (§4), so the tempting fix is to claim
+#   MORE slots than K_MAP. The pack stores all 10 forced slots, so we can just
+#   try it: K_MAP + d for d = -2 … +2, scored on the dev split.
+# Look for: LEFT — what you gain (recall) against what you pay (false
+#   positives per mixture, right-hand axis). RIGHT — why re-reading the count
+#   cannot help: the confidence the model attaches to a WRONG count.
+def count_offset_catalogue(i, d):
+    """Claim K_MAP + d slots instead of the model's own K_MAP."""
+    k = int(pack["stress_k_pred"][i]) + d
+    return pack["stress_maps"][i][:max(0, min(M, k))]
 
-fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(12, 3.1))
-for key, colr in [("recall", C["pred"]), ("precision", C["rescue"]),
-                  ("f1", C["ink"]), ("exact_k_accuracy", C["gold"])]:
-    ax0.plot(taus, [s[key] for s in sw], marker=".", color=colr,
-             label=key.replace("exact_k_accuracy", "exact-K"))
-ax0.set_xlabel("existence threshold τ"); ax0.set_ylim(0, 1.02); ax0.legend()
-title2(ax0, "Knob 1 is FLAT — thresholding\\nchanges almost nothing")
 
-for ax, subset in [(ax1, "nominal"), (ax2, "stress")]:
-    q_max = pack[f"{subset}_q_k"].max(axis=-1)
-    right = pack[f"{subset}_k_pred"] == pack[f"{subset}_k_true"]
-    bins = np.linspace(0.3, 1.0, 24)
-    ax.hist(q_max[right], bins=bins, color=C["pred"], alpha=0.75,
-            label=f"K correct (n={right.sum()})")
-    if (~right).any():
-        ax.hist(q_max[~right], bins=bins, color=C["truth"], alpha=0.75,
-                label=f"K wrong (n={(~right).sum()})")
-    conf_wrong = q_max[~right].mean() if (~right).any() else float("nan")
-    ax.set_xlabel("max q(K|x)"); ax.set_yscale("log"); ax.legend(loc="upper left")
-    title2(ax, f"{subset}: wrong answers are\\nstill given with q≈"
-           f"{conf_wrong:.2f}" if (~right).any()
-           else f"{subset}: (no wrong answers)")
+deltas = [-2, -1, 0, 1, 2]
+sw = [evaluate(lambda i, d=d: count_offset_catalogue(i, d), DEV, quiet=True)
+      for d in deltas]
+
+fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11.5, 3.5))
+ax0.plot(deltas, [s["recall"] for s in sw], marker="o", ms=5, color=C["pred"],
+         label="recall  (what you gain)")
+ax0.plot(deltas, [s["f1"] for s in sw], marker="o", ms=5, color=C["ink"],
+         label="F1")
+ax0.axvline(0, color=C["ink"], lw=0.8, ls=":", zorder=0)
+ax0.set_xticks(deltas, ["−2", "−1", "K_MAP", "+1", "+2"])
+ax0.set_xlabel("slots claimed, relative to K_MAP")
+ax0.set_ylabel("recall / F1"); ax0.set_ylim(0.55, 1.02)
+ax0.legend(loc="lower left", fontsize=8, frameon=True, framealpha=0.92,
+           edgecolor="none")
+axb = ax0.twinx()                                  # the cost, on its own axis
+axb.plot(deltas, [s["fp_per_mixture"] for s in sw], marker="s", ms=5, ls="--",
+         color=C["truth"])
+axb.set_ylabel("false positives / mixture  (what you pay)", color=C["truth"])
+axb.tick_params(axis="y", colors=C["truth"]); axb.set_ylim(0, 2.0)
+axb.grid(False)
+title2(ax0, "Every offset we try is worse than the model's own count",
+       "one extra slot: +1 pt of recall, +0.8 false positives per mixture")
+
+q_max = pack["stress_q_k"].max(axis=-1)
+right = pack["stress_k_pred"] == pack["stress_k_true"]
+bins = np.linspace(0.3, 1.0, 29)
+for m, colr, lbl in [(right, C["pred"], f"count correct (n={right.sum()})"),
+                     (~right, C["truth"], f"count wrong (n={(~right).sum()})")]:
+    ax1.hist(q_max[m], bins=bins, histtype="step", lw=2.2, color=colr,
+             weights=np.ones(m.sum()) / m.sum(), label=lbl)
+ax1.set_xlabel("max q(K | x)  —  the model's confidence in its count")
+ax1.set_ylabel("fraction of that group"); ax1.set_ylim(0, 1.05)
+ax1.legend(loc="upper left", fontsize=8)
+ax1.text(0.315, 0.55, "in distribution:\\n1200 / 1200 correct,\\nall at q ≈ 1.00",
+         fontsize=8.5, color=C["ink"])
+title2(ax1, "Wrong answers are just as confident",
+       f"mean q {q_max[right].mean():.2f} when right vs "
+       f"{q_max[~right].mean():.2f} when wrong")
 plt.tight_layout()
 
-print("q(K|x) is binary-confident even when wrong out of distribution — "
-      "a threshold\\ncannot recover information a miscalibrated posterior "
-      "does not contain.\\n(An empirical property of THIS model on THIS "
-      "stress set — not a universal law\\nof cardinality thresholding.)")'''
+print("Claiming one EXTRA slot buys about a point of recall and costs ~0.8 "
+      "more false\\npositives per mixture: the extra slot only occasionally "
+      "lands on a real source.\\nClaiming one FEWER\\nthrows away twelve points of recall for almost no "
+      "precision. F1 peaks at the model's\\nown count (0.94, vs 0.90 at +1 and "
+      "0.88 at −1), and exact-K accuracy collapses\\neither way. The right panel "
+      "shows why re-reading the count does not help here: "
+      f"{(q_max[~right] > 0.9).mean():.0%}\\nof the wrong counts are claimed "
+      "with confidence above 0.9.\\n(An empirical property of THIS model on "
+      "THIS stress set, not a universal law.)")'''
+
 
 NMS_DEFAULT = '''\
 # --- Knob 2: duplicate suppression, a.k.a. NMS (provided) ------------------
-# The rule: accept catalogue rows in order of decreasing existence p;
-# reject a row that sits closer than eps to any already-accepted row.
-# "Close" is measured by slot_distance = (Δf/5 mHz)² + (ΔA/0.25)², so
-# eps=4 means "within ~2 of those combined units of another row".
+# The rule: walk the catalogue rows in order — slot 0 first, i.e. the order
+# the network instantiated them — and reject a row that sits closer than eps
+# to any already-accepted row. "Close" is measured by
+# slot_distance = (Δf/5 mHz)² + (ΔA/0.25)², so eps=4 means "within ~2 of
+# those combined units of another row".
 from catalogue_metrics import suppress_duplicates as my_suppress_duplicates
 
 # OPTIONAL take-home: write your own (~5 greedy lines) and swap it in —
 # the self-check below must still pass.
-# def my_suppress_duplicates(cat, p, eps=4.0, sigma_f=TOL_F, sigma_a=0.25):
+# def my_suppress_duplicates(cat, eps=4.0, sigma_f=TOL_F, sigma_a=0.25):
 #     ...
 
 # self-checks: a synthetic duplicate is removed; a distant pair is kept
 cat = np.array([[1.0, 0.0, 2.700], [0.9, 0.0, 2.701], [1.1, 0.0, 2.900]])
-kept = list(my_suppress_duplicates(cat, p=np.array([0.9, 0.8, 0.95])))
+kept = list(my_suppress_duplicates(cat))
 assert kept == [0, 2], f"expected [0, 2], got {kept}"
-kept2 = list(my_suppress_duplicates(cat[[0, 2]], p=np.array([0.9, 0.95])))
+kept2 = list(my_suppress_duplicates(cat[[0, 2]]))
 assert kept2 == [0, 1], f"expected [0, 1], got {kept2}"
 print("NMS checks passed ✔")
 catalogue_metrics.suppress_duplicates = my_suppress_duplicates  # plug in'''
 
 NMS_SOL = '''\
 # --- Knob 2: duplicate suppression, a.k.a. NMS (reference) -----------------
-# The rule: accept rows in order of decreasing existence p; reject a row
+# The rule: walk the rows in priority order (slot 0 first) and reject a row
 # closer than eps to any already-accepted row, where "close" is
 # slot_distance = (Δf/5 mHz)² + (ΔA/0.25)².
-def my_suppress_duplicates(cat, p, eps=4.0, sigma_f=TOL_F, sigma_a=0.25):
+def my_suppress_duplicates(cat, eps=4.0, sigma_f=TOL_F, sigma_a=0.25):
     """Catalogue-level duplicate suppression (non-maximum suppression).
 
-    cat: (n, 3) rows [amp, phase, freq]; p: (n,) existence probabilities.
-    Greedily accept rows in order of decreasing p; reject a row if its
-    normalized distance slot_distance(row, kept_row) to any already-kept
-    row is below eps. Returns the SORTED list of kept indices.
+    cat: (n, 3) rows [amp, phase, freq], in priority order — for a model
+    catalogue that is the slot order the network instantiated. Greedily
+    accept rows, rejecting any whose normalized distance
+    slot_distance(row, kept_row) to an already-kept row is below eps.
+    Returns the list of kept indices.
     """
-    order = np.argsort(-np.asarray(p))
     kept = []
-    for i in order:
+    for i in range(len(cat)):
         if all(slot_distance(cat[i], cat[j], sigma_f, sigma_a) >= eps
                for j in kept):
             kept.append(i)
-    return sorted(kept)
+    return kept
 
 # self-checks: a synthetic duplicate is removed; a distant pair is kept
 cat = np.array([[1.0, 0.0, 2.700], [0.9, 0.0, 2.701], [1.1, 0.0, 2.900]])
-kept = list(my_suppress_duplicates(cat, p=np.array([0.9, 0.8, 0.95])))
+kept = list(my_suppress_duplicates(cat))
 assert kept == [0, 2], f"expected [0, 2], got {kept}"
-kept2 = list(my_suppress_duplicates(cat[[0, 2]], p=np.array([0.9, 0.95])))
+kept2 = list(my_suppress_duplicates(cat[[0, 2]]))
 assert kept2 == [0, 1], f"expected [0, 1], got {kept2}"
 print("NMS checks passed ✔")
 catalogue_metrics.suppress_duplicates = my_suppress_duplicates  # plug in'''
@@ -563,8 +601,8 @@ catalogue_metrics.suppress_duplicates = my_suppress_duplicates  # plug in'''
 S5_NMS_CASES = '''\
 # --- Knob 2, honestly: one case where NMS helps, one where it hurts --------
 def nms_catalogue(i, eps=4.0):
-    return build_catalogue(pack["stress_maps"][i], pack["stress_q_k"][i],
-                           tau=0.5, nms_eps=eps)
+    return build_catalogue(pack["stress_maps"][i],
+                           int(pack["stress_k_pred"][i]), nms_eps=eps)
 
 
 helps = gallery["nms_cases"]["helps"]
@@ -606,10 +644,11 @@ print("In crowded source inference, geometric closeness is not sufficient "
 S5_DISCOVER_MD = '''\
 ### The open part — form a hypothesis before you code
 
-Where you stand: the model **only ever undercounts** here, thresholding
-cannot help (the posterior is confidently wrong), and NMS trades recall
-for precision. So where could *new, correct candidates* possibly come
-from?
+Where you stand: on this stress set the model **only ever undercounts**,
+simply claiming more slots does not pay (the extra slots are mostly empty —
+about a point of recall for ~0.8 false positives per mixture — and the count
+posterior is confidently wrong), and NMS trades recall for precision. So
+where could *new, correct candidates* plausibly come from?
 
 You may use **anything in the pack** — start with `sorted(pack)`.
 
@@ -637,7 +676,7 @@ print(sorted(pack))                           # what do you actually have?
 
 def build_my_catalogue(i, pack=pack):
     """Return an (n, 3) array [amp, phase, freq] for stress signal i.
-    Baseline: the model's MAP catalogue. Improve me — PEAKS[i], EX, the
+    Baseline: the model's MAP catalogue. Improve me — PEAKS[i], the
     posterior samples, and my_suppress_duplicates are all available."""
     return baseline_catalogue(i)
 
@@ -647,8 +686,8 @@ mine_dev = evaluate(build_my_catalogue, DEV, "yours (dev 150)")
 # --- trade-off map: where do the standard strategies live? -----------------
 strategies = {
     "baseline": baseline_catalogue,
-    "τ=0.30": lambda i: pack["stress_maps"][i][:k_tau("stress", i, 0.30)],
-    "τ=0.70": lambda i: pack["stress_maps"][i][:k_tau("stress", i, 0.70)],
+    "K_MAP−1": lambda i: count_offset_catalogue(i, -1),
+    "K_MAP+1": lambda i: count_offset_catalogue(i, +1),
     "NMS ε=4": lambda i: nms_catalogue(i, 4.0),
     "yours": build_my_catalogue,
 }
@@ -702,10 +741,11 @@ print(f"\\nbaseline F1 {baseline_dev['f1']:.3f}  →  yours "
 S5_REVEAL_MD = '''\
 ### The reveal — go back to the data
 
-The observation itself is in the pack. Sources the network merged or
-missed still leave **separate spectral peaks** behind whenever they are
-resolvable; the winning decision layer keeps the network's catalogue and
-**rescues candidates from peaks that no entry explains** — with an
+The observation itself is in the pack. When a merged or missed source is
+resolvable, it often still leaves **a separate spectral peak** behind —
+often enough to be worth exploiting. So this decision layer keeps the
+network's catalogue and **rescues candidates from peaks that no entry
+explains** — with an
 explicit three-step structure any real pipeline would use:
 
 1. **candidate detection** — `find_peaks` above a height threshold;
@@ -741,8 +781,8 @@ def rescue_catalogue(i, height_frac=0.35, refine=True, nms_eps=None):
         rows.append([h, 0.0, f_ref])   # amp = rough init from peak height
     cat = np.array(rows)
     if nms_eps is not None and len(cat) > 1:
-        p = np.linspace(1, 0.5, len(cat))              # base rows first
-        cat = cat[suppress_duplicates(cat, p, nms_eps)]
+        # rows are already in priority order: network catalogue, then rescued
+        cat = cat[suppress_duplicates(cat, nms_eps)]
     return cat
 
 
@@ -809,8 +849,8 @@ S5_PARETO = '''\
 # --- The final trade-off map: every strategy on one canvas -----------------
 strategies = {
     "baseline": baseline_catalogue,
-    "τ=0.30": lambda i: pack["stress_maps"][i][:k_tau("stress", i, 0.30)],
-    "τ=0.70": lambda i: pack["stress_maps"][i][:k_tau("stress", i, 0.70)],
+    "K_MAP−1": lambda i: count_offset_catalogue(i, -1),
+    "K_MAP+1": lambda i: count_offset_catalogue(i, +1),
     "NMS ε=4": lambda i: nms_catalogue(i, 4.0),
     "rescue 0.50": lambda i: rescue_catalogue(i, 0.50),
     "rescue 0.35": lambda i: rescue_catalogue(i, 0.35),
@@ -896,9 +936,10 @@ how pipelines get fooled:
 * **B. Conditional calibration** — *among successfully associated
   sources* (|Δf| ≤ 5 mHz), do the claimed posterior intervals cover the
   truth at their nominal rate?
-* **C. Confident errors** — active slots far from every true source
+* **C. Confident errors** — claimed slots far from every true source
   (> 5 mHz) while claiming a tight posterior (σ_f < 1 mHz). Nothing
-  downstream can catch these without independent information.
+  downstream can catch these from the model's own outputs alone; it takes
+  independent information, such as refitting against the data.
 
 > Accuracy tells you whether the model was right. **Calibration tells you
 > whether it knew when it might be wrong.**'''
@@ -921,7 +962,7 @@ def calibration(subset):
         for s, j in pairs:
             S.append(pack[f"{subset}_samples"][i][s, :, 2])
             tr.append(truth[j, 2])
-        for s in range(kmap):                       # ALL active slots:
+        for s in range(kmap):                       # ALL claimed slots:
             d_near.append(np.abs(truth[:, 2] - maps[s, 2]).min())
             sig_all.append(pack[f"{subset}_stds"][i][s, 2])
     S = np.asarray(S, np.float64); tr = np.asarray(tr)
@@ -939,7 +980,7 @@ for s in SUBSETS:
     c = CAL[s]
     print(f"  {s:<8} matched {c['n_match']}/{c['n_true']} true sources "
           f"(recall {c['n_match']/c['n_true']:.3f});  "
-          f"{c['n_active'] - c['n_match']} active slots unmatched")
+          f"{c['n_active'] - c['n_match']} claimed slots unmatched")
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10.5, 3.6))
 for s, colr in [("nominal", C["pred"]), ("stress", C["truth"])]:
@@ -966,7 +1007,7 @@ ax2.set_xscale("log"); ax2.set_yscale("log")
 ax2.set_xlabel("claimed σ_f  [mHz]")
 ax2.set_ylabel("distance to nearest true source  [mHz]")
 ax2.legend(loc="lower right")
-title2(ax2, "Every active slot: claim vs reality",
+title2(ax2, "Every claimed slot: claim vs reality",
        "above horizontal line = no association (5 mHz)")
 plt.tight_layout()
 
@@ -1048,7 +1089,7 @@ A0_LIVE = '''\
 # --- A0: run the pretrained model yourself (needs the 464 MB checkpoint) ---
 # Everything above read precomputed arrays. This cell does LIVE what the
 # pack generator (make_predictions_pack.py) did offline. Requirements:
-#   pip install torch nflows
+#   pip install torch nflows          (on Colab: %pip install -q nflows)
 #   the released weights + config in ../pretrained_model/test_clariden/:
 #     curl -L --create-dirs -o ../pretrained_model/test_clariden/checkpoints/best_model.ckpt \\
 #          https://github.com/nhouba/slotflow-inference/releases/download/v1.0.0/best_model.ckpt
@@ -1202,9 +1243,17 @@ title2(ax, "Detection dies where sources become unresolvable",
 plt.tight_layout()'''
 
 
+COLAB = ("[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]"
+         "(https://colab.research.google.com/github/nhouba/slotflow-esa-workshop/"
+         "blob/main/{nb})\n\n")
+
+
 def cells(solution):
     title = TITLE if not solution else TITLE.replace(
         "# Tutorial 2 —", "# Tutorial 2 (SOLUTION) —")
+    # "Open in Colab" badge, so the notebook is one click from GitHub
+    title = COLAB.format(nb="slotflow_tutorial_2_solution.ipynb" if solution
+                         else "slotflow_tutorial_2_diagnose.ipynb") + title
     out = [
         md(title), code(SETUP),
         md(S1_MD), code(S1_CODE), code(S1_CONFUSION), code(S1_LIVE),

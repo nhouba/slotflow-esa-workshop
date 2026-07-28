@@ -11,7 +11,24 @@ tutorials on **amortized trans-dimensional inference**: jointly inferring
 Everything runs **CPU-only**, locally or on Google Colab, and the repo is
 self-contained — clone it and you have all data included.
 
-## Quick start
+## Run it on Google Colab — no install, nothing to download
+
+Click a badge, then run the first cell. It clones this repository (data
+included) into the Colab session and everything else just runs; no GPU and
+no LISA software stack are needed.
+
+| tutorial | start here | reference solution |
+|---|---|---|
+| **Tutorial 1** (40 min) — build the mechanism: break an ordered loss on purpose, then fix it with Hungarian matching *(one coding TODO)* | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nhouba/slotflow-esa-workshop/blob/main/slotflow_tutorial_1_toy.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nhouba/slotflow-esa-workshop/blob/main/slotflow_tutorial_1_solution.ipynb) |
+| **Tutorial 2** (60 min) — diagnose the pretrained SlotFlow: failure gallery, calibration, and the Catalogue Challenge *(one coding task)* | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nhouba/slotflow-esa-workshop/blob/main/slotflow_tutorial_2_diagnose.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nhouba/slotflow-esa-workshop/blob/main/slotflow_tutorial_2_solution.ipynb) |
+
+The solution notebooks are already executed, so they are also readable
+without running anything.
+
+Colab sessions are ephemeral: your edits live in *your* Colab copy
+(`File → Save a copy in Drive`), not in this repository.
+
+## Run it locally
 
 ```bash
 git clone https://github.com/nhouba/slotflow-esa-workshop.git
@@ -20,16 +37,13 @@ pip install torch numpy scipy matplotlib scikit-learn jupyter ipywidgets
 jupyter lab
 ```
 
-On Colab: upload a notebook (or open it from GitHub) and run the first
-cell — it clones this repository automatically.
-
 ## The materials
 
 | file | what it is |
 |---|---|
-| `slides/slotflow_esa_workshop_talk.pdf` | the 20-minute introduction |
+| `slides/Introduction-SlotFlow.pdf` | the 20-minute introduction |
 | `slotflow_tutorial_1_toy.ipynb` | **Tutorial 1 (40 min):** train a tiny slot-based set predictor on toy spectral sources; break it with an ordered loss, watch it hedge to the analytic floor, then fix it by implementing Hungarian matching (the session's one coding TODO). |
-| `slotflow_tutorial_2_diagnose.ipynb` | **Tutorial 2 (60 min):** diagnose the pretrained SlotFlow model from a precomputed prediction pack — slot tables (K_true vs K_MAP vs K_τ), slot-identity experiments, a multi-label failure gallery, and the Catalogue Challenge: improve the decision layer and beat the model's own catalogue. |
+| `slotflow_tutorial_2_diagnose.ipynb` | **Tutorial 2 (60 min):** diagnose the pretrained SlotFlow model from a precomputed prediction pack — slot tables (K_true vs K_MAP), slot-identity experiments, a multi-label failure gallery, and the Catalogue Challenge: improve the decision layer and beat the model's own catalogue. |
 | `slotflow_tutorial_*_solution.ipynb` | the same notebooks with reference implementations, fully executed — readable without running anything |
 
 Both tutorials follow the same discipline: *representation ≠ inference ≠
