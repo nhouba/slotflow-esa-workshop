@@ -40,7 +40,10 @@ stability experiments. Everything
 it produced — the cardinality posterior q(K|x), each slot's MAP
 parameters, posterior samples and widths, embeddings, the input spectra,
 and the true catalogues — is stored in a **prediction pack** that every
-cell below reads from. That is why the notebook is fast and CPU-only.
+cell below reads from. In code that pack is a plain Python dictionary
+called `pack`: the keys are names like `stress_maps` or `stress_spec`, and
+the values are numpy arrays with one entry per test signal. That is why the
+notebook is fast and CPU-only.
 Appendix **A0** shows how to run the pretrained model yourself.
 
 | when | what |
@@ -675,7 +678,10 @@ about a point of recall for ~0.8 false positives per mixture — and the count
 posterior is confidently wrong), and NMS trades recall for precision. So
 where could *new, correct candidates* plausibly come from?
 
-You may use **anything in the pack** — start with `sorted(pack)`.
+You may use **anything in the pack** — that is the dictionary `pack`, holding
+everything the model produced offline plus the data it was given. Run
+`sorted(pack)` to print the names of the arrays inside it, and index them as
+`pack["stress_maps"][i]` for signal `i`.
 
 **Where you type:** the next cell contains one function,
 `build_my_catalogue(i)`, with a marked block inside it. Edit that block, run
