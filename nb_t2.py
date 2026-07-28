@@ -652,6 +652,12 @@ where could *new, correct candidates* plausibly come from?
 
 You may use **anything in the pack** — start with `sorted(pack)`.
 
+**Where you type:** the next cell contains one function,
+`build_my_catalogue(i)`, with a marked block inside it. Edit that block, run
+the cell, and the check underneath tells you whether your catalogue is
+well-formed and how it scores against the model's own. The cell after it plots
+where you landed.
+
 <details><summary><b>Hint 1</b> (click)</summary>
 The network's output is not the original observation. What did the model
 <em>read</em>, and do you still have it?</details>
@@ -669,21 +675,40 @@ a first attempt — the precomputed <code>PEAKS[i]</code> cache saves you the
 signal processing. The solution notebook adds local refinement; write your
 version first.</details>'''
 
-S5_SCAFFOLD = '''\
-# --- Your decision layer ----------------------------------------------------
-print(sorted(pack))                           # what do you actually have?
+S5_TASK = '''\
+# ===========================  YOUR TASK  ===================================
+# Edit ONE function: build_my_catalogue(i). It gets the index of a stress
+# signal and must return an (n, 3) array — one row per source you claim,
+# columns [amp, phase, freq]. You choose n; it need not equal K_MAP.
+#
+# Everything you may use is already in memory, and every call is instant:
+#   baseline_catalogue(i)              the model's own answer — the thing to beat
+#   pack[...]                          run  sorted(pack)  to list every array
+#   my_suppress_duplicates(cat, eps)   the suppression rule from above
+#   TOL_F                              the 5 mHz matching tolerance
+#
+# Then run this cell: the check below tells you whether your function returns
+# what the scorer expects, and how it scores against the model on DEV.
+# (The three hints above are collapsible — hint 3 gives a concrete recipe.)
+# ===========================================================================
+def build_my_catalogue(i):
+    cat = baseline_catalogue(i)          # start from the model's own catalogue
+
+    # ----------------------- YOUR CODE HERE ------------------------------
+    # add rows, drop rows, or replace `cat` entirely
+    # ---------------------------------------------------------------------
+
+    return cat
 
 
-def build_my_catalogue(i, pack=pack):
-    """Return an (n, 3) array [amp, phase, freq] for stress signal i.
-    Baseline: the model's MAP catalogue. Improve me — PEAKS[i], the
-    posterior samples, and my_suppress_duplicates are all available."""
-    return baseline_catalogue(i)
+mine_dev = check_my_catalogue(build_my_catalogue)'''
 
 
-mine_dev = evaluate(build_my_catalogue, DEV, "yours (dev 150)")
-
-# --- trade-off map: where do the standard strategies live? -----------------
+S5_SCORE = '''\
+# --- The scoreboard: re-run this after every edit --------------------------
+# What: your catalogue against the model's own and the two knobs, on the dev
+#   split, in the two views that matter — recall vs contamination (left) and
+#   precision vs recall (right). Your point is green.
 strategies = {
     "baseline": baseline_catalogue,
     "K_MAP−1": lambda i: count_offset_catalogue(i, -1),
@@ -1268,7 +1293,7 @@ def cells(solution):
         out += [md(S5_REVEAL_MD), code(S5_RESCUE), code(S5_RESCUE_VIS),
                 code(S5_PARETO)]
     else:
-        out += [md(S5_DISCOVER_MD), code(S5_SCAFFOLD)]
+        out += [md(S5_DISCOVER_MD), code(S5_TASK), code(S5_SCORE)]
     out += [
         md(S6_MD), code(S6_CAL),
         md(S8_MD), md(S8_CLOSE),

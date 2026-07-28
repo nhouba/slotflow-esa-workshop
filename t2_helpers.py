@@ -24,7 +24,7 @@ from catalogue_metrics import match_catalogue, catalogue_scores, TOL_F
 __all__ = ["pack", "gallery", "M", "SUBSETS", "TRUTHS", "FREQS_AXIS",
            "BAND", "FB", "DF_BIN", "PEAKS", "DEV", "FULL", "k_map",
            "evaluate", "baseline_catalogue", "show_signal", "slot_table",
-           "live_demo"]
+           "check_my_catalogue", "live_demo"]
 
 pack = gallery = None
 M = 10
@@ -238,3 +238,43 @@ def slot_table(subset, i, k=None):
         print("  ✗ unexplained true sources: " + ", ".join(
             f"f={truth[j, 2]:.4f} Hz (A={truth[j, 0]:.2f})" for j in un_t))
     print()
+
+
+def check_my_catalogue(build_fn, idx=None):
+    """Contract check + instant dev score for a participant's decision layer.
+
+    Mirrors Tutorial 1's self-check: first make sure the function returns what
+    the scorer expects (with a readable message if not), then score it on the
+    development split against the model's own catalogue.
+    """
+    for i in (0, 1, 7, 42, 149):
+        cat = np.asarray(build_fn(int(i)), dtype=float)
+        assert cat.ndim == 2 and cat.shape[1] == 3, (
+            f"build_my_catalogue({i}) returned shape {cat.shape}; expected "
+            "(n, 3) — one row per claimed source, columns [amp, phase, freq]")
+        assert np.isfinite(cat).all(), (
+            f"build_my_catalogue({i}) returned non-finite values")
+        if len(cat):
+            f = cat[:, 2]
+            assert f.min() > 2.0 and f.max() < 3.5, (
+                f"build_my_catalogue({i}): frequencies are "
+                f"{f.min():.3f}–{f.max():.3f} Hz, which is outside the band — "
+                "column 2 must be the frequency in Hz (rows are [amp, phase, freq])")
+    print("contract ok ✔   (n, 3) rows of [amp, phase, freq]\n")
+
+    base = evaluate(baseline_catalogue, DEV, "the model itself (dev 150)")
+    mine = evaluate(build_fn, DEV, "yours              (dev 150)")
+    d = mine["f1"] - base["f1"]
+    if abs(d) < 1e-12:
+        print("\n→ identical to the model's own catalogue: nothing has changed "
+              "yet.\n  Edit the marked block above, then re-run this cell.")
+    elif d > 0:
+        print(f"\n→ you beat the model's own catalogue: F1 {base['f1']:.3f} → "
+              f"{mine['f1']:.3f}  🎉\n  Now check the trade-off plot below — F1 "
+              "hides which way you paid for it.")
+    else:
+        print(f"\n→ F1 {base['f1']:.3f} → {mine['f1']:.3f}, so this is behind "
+              "the baseline.\n  That is useful information too: look at recall "
+              "vs false positives below.\n  The three hints above open up if "
+              "you want a concrete recipe.")
+    return mine
