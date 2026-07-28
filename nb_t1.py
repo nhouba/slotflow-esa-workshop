@@ -734,8 +734,6 @@ S6_MD = '''\
 1. **Catalogues are unordered.**
 2. **Slot indices are arbitrary.**
 3. **Training *and evaluation* must both account for permutation.**
-4. **Ambiguity tracked indistinguishability under the complete metric** —
-   frequency crowding alone did not produce it here.
 
 The concept map below is the whole morning in one picture — and the bridge
 to this afternoon, where the number of sources itself becomes unknown.'''
