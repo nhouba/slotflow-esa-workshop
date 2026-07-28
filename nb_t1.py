@@ -358,8 +358,10 @@ $$C_{ij} = w_\\mu(\\hat\\mu_i - \\mu_j)^2 + w_A(\\hat A_i - A_j)^2 ,
 \\qquad \\mathcal{L}_{\\rm Hungarian} = \\sum_i C_{i,\\pi^*(i)},$$
 
 where $\\pi^*$ is the minimum-cost assignment from
-`scipy.optimize.linear_sum_assignment` — the solver version of what you
-just did by hand.
+[`scipy.optimize.linear_sum_assignment`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html)
+— the solver version of what you just did by hand. It takes a cost matrix
+and returns `(row_indices, col_indices)`: the rows and columns of the
+cells it picked.
 
 The cost matrix is **given** (read it — one broadcast). Your TODO is the
 part that carries the idea: the assignment loop. Two facts to get right
@@ -387,6 +389,10 @@ TODO = COST_DOC + '''
 
 
 from scipy.optimize import linear_sum_assignment
+# docs: https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html
+#   row, col = linear_sum_assignment(C)   # C: (n, n) numpy cost matrix
+#   -> row = [0, 1, ...], col = the source each row was matched to,
+#      so C[row, col] are the chosen cells and C[row, col].sum() their total.
 
 def hungarian_loss(pred, target, w_mu=1.0, w_a=1.0):
     """Minimum-cost one-to-one assignment per batch element (see notes above)."""
@@ -406,6 +412,7 @@ SOL = COST_DOC + '''
 
 
 from scipy.optimize import linear_sum_assignment
+# docs: https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html
 
 def hungarian_loss(pred, target, w_mu=1.0, w_a=1.0):
     """Minimum-cost one-to-one assignment per batch element (see notes above)."""

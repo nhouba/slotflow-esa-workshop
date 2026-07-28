@@ -497,7 +497,7 @@ deltas = [-2, -1, 0, 1, 2]
 sw = [evaluate(lambda i, d=d: count_offset_catalogue(i, d), DEV, quiet=True)
       for d in deltas]
 
-fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11.5, 3.5))
+fig, ax0 = plt.subplots(figsize=(6.4, 3.6))
 ax0.plot(deltas, [s["recall"] for s in sw], marker="o", ms=5, color=C["pred"],
          label="recall  (what you gain)")
 ax0.plot(deltas, [s["f1"] for s in sw], marker="o", ms=5, color=C["ink"],
@@ -519,30 +519,51 @@ title2(ax0, "Every offset we try is worse than the model's own count",
 
 q_max = pack["stress_q_k"].max(axis=-1)
 right = pack["stress_k_pred"] == pack["stress_k_true"]
-bins = np.linspace(0.3, 1.0, 29)
-for m, colr, lbl in [(right, C["pred"], f"count correct (n={right.sum()})"),
-                     (~right, C["truth"], f"count wrong (n={(~right).sum()})")]:
-    ax1.hist(q_max[m], bins=bins, histtype="step", lw=2.2, color=colr,
-             weights=np.ones(m.sum()) / m.sum(), label=lbl)
-ax1.set_xlabel("max q(K | x)  —  the model's confidence in its count")
-ax1.set_ylabel("fraction of that group"); ax1.set_ylim(0, 1.05)
-ax1.legend(loc="upper left", fontsize=8)
-ax1.text(0.315, 0.55, "in distribution:\\n1200 / 1200 correct,\\nall at q ≈ 1.00",
-         fontsize=8.5, color=C["ink"])
-title2(ax1, "Wrong answers are just as confident",
-       f"mean q {q_max[right].mean():.2f} when right vs "
-       f"{q_max[~right].mean():.2f} when wrong")
 plt.tight_layout()
 
 print("Claiming one EXTRA slot buys about a point of recall and costs ~0.8 "
       "more false\\npositives per mixture: the extra slot only occasionally "
-      "lands on a real source.\\nClaiming one FEWER\\nthrows away twelve points of recall for almost no "
-      "precision. F1 peaks at the model's\\nown count (0.94, vs 0.90 at +1 and "
-      "0.88 at −1), and exact-K accuracy collapses\\neither way. The right panel "
-      "shows why re-reading the count does not help here: "
-      f"{(q_max[~right] > 0.9).mean():.0%}\\nof the wrong counts are claimed "
-      "with confidence above 0.9.\\n(An empirical property of THIS model on "
-      "THIS stress set, not a universal law.)")'''
+      "lands on a real source.\\nClaiming one FEWER throws away twelve points "
+      "of recall for almost no precision.\\nF1 peaks at the model's own count "
+      "(0.94, vs 0.90 at +1 and 0.88 at −1), and exact-K\\naccuracy collapses "
+      "either way.")
+print(f"\\nRe-reading the count cannot help either: q(K|x) is just as confident "
+      f"when it is\\nwrong. Mean max-q is {q_max[right].mean():.2f} when the "
+      f"count is right and {q_max[~right].mean():.2f} when it is wrong, and\\n"
+      f"{(q_max[~right] > 0.9).mean():.0%} of the wrong counts are claimed "
+      "above 0.9. In distribution there are no wrong\\ncounts at all "
+      "(1200/1200). An empirical property of THIS model on THIS stress set,\\n"
+      "not a universal law.")'''
+
+
+NMS_MD = '''\
+### Knob 2 — duplicate suppression, step by step
+
+Sometimes the model spends two slots on **one** source: two claims a fraction
+of a millihertz apart, where only one real source exists. Duplicate suppression
+("non-maximum suppression", NMS, the name computer vision uses) removes the
+redundant one. The rule below is five lines, and worth reading carefully
+because *how* it decides is the whole story:
+
+1. **Walk the claims in order.** The network instantiates slots in index order,
+   so slot 0 first. That order is the priority: earlier claims win.
+2. **Measure how close two claims are** — but in *normalized* units, not raw
+   ones:
+   $$d = \\Big(\\frac{\\Delta f}{5~\\text{mHz}}\\Big)^{2}
+        + \\Big(\\frac{\\Delta A}{0.25}\\Big)^{2}.$$
+   Raw units would be meaningless here: frequencies are around 2.7 (Hz) and
+   amplitudes around 1, so frequency would dominate any comparison by a factor
+   of a thousand. Dividing each by a scale we care about — the matching
+   tolerance for frequency, a quarter for amplitude — puts them on equal terms.
+3. **Reject a claim if it lands within ε of one already accepted.** With
+   $\\varepsilon = 4$, "too close" means roughly *two* of those combined units:
+   e.g. two claims 10 mHz apart at equal amplitude give $d = 4$ and just
+   survive, while 5 mHz apart gives $d = 1$ and the second is dropped.
+
+So ε is the one number you tune. Small ε removes only near-identical claims.
+Large ε starts deleting genuinely different sources. The next cell measures
+exactly where that turns — with one case where suppression helps and one where
+it destroys a correct answer.'''
 
 
 NMS_DEFAULT = '''\
@@ -799,15 +820,37 @@ The observation itself is in the pack. When a merged or missed source is
 resolvable, it often still leaves **a separate spectral peak** behind —
 often enough to be worth exploiting. So this decision layer keeps the
 network's catalogue and **rescues candidates from peaks that no entry
-explains** — with an
-explicit three-step structure any real pipeline would use:
+explains** — with an explicit three-step structure any real pipeline
+would use:
 
 1. **candidate detection** — `find_peaks` above a height threshold;
 2. **rough initialization** — peak height and bin-center frequency;
 3. **local refinement** — sub-bin frequency from a parabolic fit to the
    log-spectrum around the peak. *(A real pipeline would refit the
    candidate sinusoid on the raw time series — that needs data outside
-   this magnitude-only pack, and is the natural take-home.)*'''
+   this magnitude-only pack, and is the natural take-home.)*
+
+**What the height threshold does, since it is the knob you tune.** `PEAKS[i]`
+stores every peak of signal *i*'s spectrum with its height expressed as a
+**fraction of the tallest peak in that window**. So `height_frac = 0.35` means
+"only consider peaks at least 35% as tall as the biggest one here". It is
+relative on purpose: the absolute scale changes from signal to signal, the
+shape does not.
+
+That one number sets how aggressive the rescue is:
+
+| height threshold | behaviour |
+|---|---|
+| high (0.50) | only obvious peaks are claimed — few additions, few mistakes |
+| medium (0.35) | the setting used below |
+| low (0.25) | more real sources recovered, and more noise bumps claimed too |
+
+Which is why the strategies in the final plot are labelled by their height
+threshold: `rescue 0.50`, `rescue 0.35`, `rescue 0.25` are the *same code* at
+three levels of aggressiveness, and they trace out the trade-off between recall
+and contamination. There is no universally right value — it depends which
+operational track you picked.'''
+
 
 S5_RESCUE = '''\
 def refine_freq(spec_band, j):
@@ -1315,7 +1358,7 @@ def cells(solution):
         md(S3_MD), code(S3_STAB), code(S3_STRUCT), md(S3_DIST),
         md(S4_MD), code(S4_SHOW), code(S4_REVEAL),
         md(S5_MD), code(S5_BASELINE), code(S5_SWEEP),
-        code(NMS_SOL if solution else NMS_DEFAULT),
+        md(NMS_MD), code(NMS_SOL if solution else NMS_DEFAULT),
         code(S5_NMS_CASES),
     ]
     if solution:
