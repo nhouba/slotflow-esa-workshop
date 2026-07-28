@@ -763,6 +763,35 @@ print(f"\\nbaseline F1 {baseline_dev['f1']:.3f}  →  yours "
 # when you are happy on DEV, run ONCE on the full 800:
 # evaluate(build_my_catalogue, FULL, "yours (full 800)")'''
 
+S5_TASK_SOL = '''\
+# =====================  YOUR TASK — the filled-in version  =================
+# This is exactly the cell you were editing, with the marked block completed:
+# keep the network's catalogue, then add a candidate for every spectral peak
+# that no catalogue row explains. Eight lines, and it is the whole idea.
+# (rescue_catalogue below is the same move with a tunable height threshold and
+#  the extra local-refinement stage.)
+# ===========================================================================
+def build_my_catalogue(i):
+    cat = baseline_catalogue(i)          # start from the model's own catalogue
+
+    # ----------------------- YOUR CODE HERE ------------------------------
+    pk_f, pk_h, _ = PEAKS[i]             # peaks of the spectrum the model READ
+    rows = list(cat)
+    for f0, h in zip(pk_f, pk_h):
+        if h < 0.35:                      # too small to be worth claiming
+            continue
+        if np.abs(cat[:, 2] - f0).min() <= TOL_F:
+            continue                      # a catalogue row already explains it
+        rows.append([h, 0.0, f0])         # amp = peak height, phase unused
+    cat = np.array(rows)
+    # ---------------------------------------------------------------------
+
+    return cat
+
+
+mine_dev = check_my_catalogue(build_my_catalogue)'''
+
+
 S5_REVEAL_MD = '''\
 ### The reveal — go back to the data
 
@@ -1290,8 +1319,8 @@ def cells(solution):
         code(S5_NMS_CASES),
     ]
     if solution:
-        out += [md(S5_REVEAL_MD), code(S5_RESCUE), code(S5_RESCUE_VIS),
-                code(S5_PARETO)]
+        out += [md(S5_REVEAL_MD), code(S5_TASK_SOL), code(S5_RESCUE),
+                code(S5_RESCUE_VIS), code(S5_SCORE), code(S5_PARETO)]
     else:
         out += [md(S5_DISCOVER_MD), code(S5_TASK), code(S5_SCORE)]
     out += [
