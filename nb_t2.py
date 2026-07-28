@@ -453,10 +453,14 @@ final catalogue you would publish:
 | exact-K accuracy | fraction of signals with the count exactly right |
 | F1 | harmonic mean of recall and precision — one number, hides the trade-off |
 
-Rules: develop against `DEV`, a fixed **development split** of 150 stress
-signals with instant feedback, and run the full 800 **once** at the end —
-the same discipline as a blinded analysis: tune on one dataset, report on
-another. Pick an **operational track**: **Discovery** (maximize recall
+Rules: develop against `DEV` — short for **development split**, the set you
+tune on. Here it is `np.arange(150)`, the first 150 of the 800 stress
+signals, small enough that scoring is instant. `FULL` is all 800, and you
+run it **once**, at the end. That is the discipline of a blinded analysis:
+decide your rule on one set of data, then report on another. (Being precise:
+`DEV` is a *subset* of `FULL`, so the final number is not perfectly held
+out. With 150 of 800 the effect is small, and in a real analysis you would
+keep the two disjoint.) Pick an **operational track**: **Discovery** (maximize recall
 subject to ≤ 0.5 false positives per mixture) or **Conservative**
 (maximize precision subject to recall ≥ 0.90). The trade-off plot matters
 more than any single scalar.
